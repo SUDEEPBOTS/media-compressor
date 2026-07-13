@@ -8,6 +8,8 @@ A premium, fast, and secure media compressor built with React and FastAPI.
 - **Images:** Compressed purely in the browser (client-side) for absolute privacy and zero server cost.
 - **Videos:** Securely uploaded and compressed via a fast FFmpeg backend, with strict size limits and auto-cleanup to prevent server bloat.
 
+**Topics / Tags:** `#media-compressor` `#video-compressor` `#image-compressor` `#fastapi` `#react` `#ffmpeg` `#glassmorphism` `#vite`
+
 ## Features ✨
 
 - **Glassmorphic UI:** A beautifully designed dark theme using Framer Motion and Lucide Icons.
