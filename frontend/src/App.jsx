@@ -39,15 +39,50 @@ function App() {
   const handleFileSelect = async (selectedFile) => {
     if (!selectedFile) return;
     
-    // Check if it's an image
-    if (!selectedFile.type.startsWith('image/')) {
-      alert("Please upload an image file (JPEG, PNG, WebP). Video support coming soon!");
+    // Check if it's an image or video
+    if (!selectedFile.type.startsWith('image/') && !selectedFile.type.startsWith('video/')) {
+      alert("Please upload an image or video file.");
       return;
     }
 
     setFile(selectedFile);
     setCompressedFile(null);
-    await compressImage(selectedFile);
+    
+    if (selectedFile.type.startsWith('image/')) {
+      await compressImage(selectedFile);
+    } else {
+      await compressVideo(selectedFile);
+    }
+  };
+
+  const compressVideo = async (videoFile) => {
+    setIsCompressing(true);
+    const formData = new FormData();
+    formData.append('file', videoFile);
+
+    try {
+      // In production, the backend serves the app so /api works directly.
+      const response = await fetch('/api/compress-video', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Video compression failed on server.');
+      }
+
+      const blob = await response.blob();
+      // Add a custom property to blob so we know its original name
+      blob.name = `compressed_${videoFile.name}`;
+      setCompressedFile(blob);
+    } catch (error) {
+      console.error(error);
+      alert(error.message);
+      setFile(null);
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   const compressImage = async (imageFile) => {
@@ -107,12 +142,12 @@ function App() {
                 <UploadCloud size={40} />
               </div>
               <h2>Drag & Drop your media here</h2>
-              <p>Supports JPEG, PNG, WebP (Video support in beta)</p>
+              <p>Supports Images (JPEG, PNG, WebP) & Videos (Max 50MB)</p>
               
               <input 
                 id="file-input" 
                 type="file" 
-                accept="image/*" 
+                accept="image/*,video/*" 
                 onChange={(e) => handleFileSelect(e.target.files[0])} 
                 style={{display: 'none'}} 
               />
