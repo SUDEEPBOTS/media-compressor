@@ -1,13 +1,18 @@
 import React, { useState, useCallback } from 'react';
 import imageCompression from 'browser-image-compression';
-import { UploadCloud, FileImage, Download, ChevronRight, RefreshCw } from 'lucide-react';
+import { UploadCloud, FileImage, Download, ChevronRight, RefreshCw, Film } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import axios from 'axios';
+import confetti from 'canvas-confetti';
+
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB
 
 function App() {
   const [file, setFile] = useState(null);
   const [compressedFile, setCompressedFile] = useState(null);
   const [isCompressing, setIsCompressing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   const formatBytes = (bytes, decimals = 2) => {
     if (bytes === 0) return '0 Bytes';
@@ -16,6 +21,15 @@ function App() {
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  };
+
+  const triggerConfetti = () => {
+    confetti({
+      particleCount: 100,
+      spread: 70,
+      origin: { y: 0.6 },
+      colors: ['#8b5cf6', '#ec4899', '#10b981']
+    });
   };
 
   const handleDragOver = useCallback((e) => {
@@ -39,14 +53,21 @@ function App() {
   const handleFileSelect = async (selectedFile) => {
     if (!selectedFile) return;
     
-    // Check if it's an image or video
+    // Security check: Only allow images and videos
     if (!selectedFile.type.startsWith('image/') && !selectedFile.type.startsWith('video/')) {
-      alert("Please upload an image or video file.");
+      alert("Security Block: Please upload a valid image or video file.");
+      return;
+    }
+
+    // Security check: 50MB file size limit for videos (client-side block to save bandwidth)
+    if (selectedFile.type.startsWith('video/') && selectedFile.size > MAX_VIDEO_SIZE) {
+      alert("File too large! Maximum video size is 50MB.");
       return;
     }
 
     setFile(selectedFile);
     setCompressedFile(null);
+    setUploadProgress(0);
     
     if (selectedFile.type.startsWith('image/')) {
       await compressImage(selectedFile);
@@ -57,28 +78,27 @@ function App() {
 
   const compressVideo = async (videoFile) => {
     setIsCompressing(true);
+    setUploadProgress(0);
     const formData = new FormData();
     formData.append('file', videoFile);
 
     try {
-      // In production, the backend serves the app so /api works directly.
-      const response = await fetch('/api/compress-video', {
-        method: 'POST',
-        body: formData,
+      const response = await axios.post('/api/compress-video', formData, {
+        responseType: 'blob',
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          setUploadProgress(percentCompleted);
+        }
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Video compression failed on server.');
-      }
-
-      const blob = await response.blob();
-      // Add a custom property to blob so we know its original name
+      const blob = response.data;
       blob.name = `compressed_${videoFile.name}`;
       setCompressedFile(blob);
+      triggerConfetti();
     } catch (error) {
       console.error(error);
-      alert(error.message);
+      const errorMsg = error.response?.data?.detail || error.message || 'Video compression failed.';
+      alert(`Error: ${errorMsg}`);
       setFile(null);
     } finally {
       setIsCompressing(false);
@@ -92,15 +112,17 @@ function App() {
       maxSizeMB: 1,
       maxWidthOrHeight: 1920,
       useWebWorker: true,
-      onProgress: (p) => console.log(p)
+      onProgress: (p) => setUploadProgress(p) // Reusing progress state for image worker
     };
 
     try {
       const compressed = await imageCompression(imageFile, options);
       setCompressedFile(compressed);
+      triggerConfetti();
     } catch (error) {
       console.error(error);
       alert("Compression failed. Please try another image.");
+      setFile(null);
     } finally {
       setIsCompressing(false);
     }
@@ -111,7 +133,7 @@ function App() {
     const url = URL.createObjectURL(compressedFile);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `compressed_${file.name}`;
+    link.download = compressedFile.name || `compressed_${file.name}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -121,7 +143,7 @@ function App() {
     <div className="container">
       <header className="header">
         <h1>Media Compressor Pro</h1>
-        <p>Compress images instantly in your browser. Zero quality loss, absolute privacy.</p>
+        <p>Compress images & videos instantly. Bank-grade security with auto-cleanup.</p>
       </header>
 
       <AnimatePresence mode="wait">
@@ -162,7 +184,11 @@ function App() {
             className="preview-card"
           >
             <div style={{display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem'}}>
-              <FileImage size={32} color="var(--primary)" />
+              {file.type.startsWith('video/') ? (
+                 <Film size={32} color="var(--primary)" />
+              ) : (
+                 <FileImage size={32} color="var(--primary)" />
+              )}
               <div>
                 <h3 style={{fontSize: '1.2rem', marginBottom: '0.2rem'}}>{file.name}</h3>
                 <p style={{margin: 0, fontSize: '0.9rem'}}>Original Size: {formatBytes(file.size)}</p>
@@ -172,7 +198,12 @@ function App() {
             {isCompressing ? (
               <div style={{textAlign: 'center', padding: '3rem 0'}}>
                 <RefreshCw size={40} color="var(--primary)" className="spin" style={{animation: 'spin 1s linear infinite', marginBottom: '1rem'}} />
-                <h2>Compressing Magic...</h2>
+                <h2>{file.type.startsWith('video/') ? (uploadProgress < 100 ? `Uploading Video... ${uploadProgress}%` : 'Compressing on Server... Please wait') : `Compressing Image... ${uploadProgress}%`}</h2>
+                
+                {/* Progress Bar Container */}
+                <div style={{width: '100%', height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '10px', marginTop: '1.5rem', overflow: 'hidden'}}>
+                   <div style={{width: `${uploadProgress}%`, height: '100%', background: 'linear-gradient(90deg, var(--primary), var(--secondary))', transition: 'width 0.3s ease'}} />
+                </div>
               </div>
             ) : compressedFile && (
               <motion.div initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}}>
@@ -191,7 +222,7 @@ function App() {
                 </div>
 
                 <div style={{textAlign: 'center', marginTop: '1.5rem', fontSize: '1.2rem'}}>
-                  Saved <strong style={{color: 'var(--success)'}}>{Math.round((1 - compressedFile.size / file.size) * 100)}%</strong> of space!
+                  Saved <strong style={{color: 'var(--success)'}}>{Math.max(0, Math.round((1 - compressedFile.size / file.size) * 100))}%</strong> of space!
                 </div>
 
                 <button className="download-btn" onClick={handleDownload}>
@@ -202,7 +233,7 @@ function App() {
                 <div style={{textAlign: 'center', marginTop: '1rem'}}>
                   <button 
                     onClick={() => { setFile(null); setCompressedFile(null); }}
-                    style={{background: 'transparent', color: 'var(--text-muted)', fontSize: '1rem', padding: '0.5rem'}}
+                    style={{background: 'transparent', color: 'var(--text-muted)', border: 'none', cursor: 'pointer', fontSize: '1rem', padding: '0.5rem'}}
                   >
                     Compress Another File
                   </button>
